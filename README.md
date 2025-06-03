@@ -45,10 +45,21 @@ npm start
 
 ## 📊 API 接口
 
+### 获取图片分类列表
+- **GET** `/api/photo-categories`
+- **描述**: 获取所有图片分类及其基本信息
+- **返回**: 图片分类信息数组，包含分类名称、图片数量、封面图片等
+
+### 获取分类下的图片
+- **GET** `/api/photos/:category`
+- **描述**: 获取指定分类下的所有图片文件
+- **参数**: `category` - 分类英文名称（Documentary, landscapes, Meeting, people, wedding）
+- **返回**: 该分类下的图片文件信息数组
+
 ### 获取所有照片
 - **GET** `/api/photos`
-- **描述**: 获取PublicAssets/photo目录下的所有照片文件
-- **返回**: 照片文件信息数组
+- **描述**: 获取所有分类下的照片文件（向后兼容）
+- **返回**: 所有照片文件信息数组
 
 ### 获取所有视频
 - **GET** `/api/videos`  
@@ -65,20 +76,36 @@ npm start
 - **描述**: 检查服务器运行状态
 
 ### 静态文件访问
-- **GET** `/assets/photo/{filename}`
+- **GET** `/assets/photo/{category}/{filename}`
 - **GET** `/assets/video/{filename}`
 - **描述**: 直接访问媒体文件
 
 ## 📝 响应格式
+
+### 图片分类对象
+```json
+{
+  "id": "Documentary",
+  "name": "纪实",
+  "englishName": "Documentary",
+  "photoCount": 10,
+  "coverImage": {
+    "name": "photo1.jpg",
+    "url": "/assets/photo/Documentary/photo1.jpg"
+  }
+}
+```
 
 ### 媒体文件对象
 ```json
 {
   "id": "unique_id",
   "name": "filename.jpg",
-  "url": "/assets/photo/filename.jpg",
+  "url": "/assets/photo/Documentary/filename.jpg",
   "size": 1024000,
-  "type": "image|video"
+  "type": "image",
+  "category": "Documentary",
+  "categoryName": "纪实"
 }
 ```
 
@@ -114,3 +141,22 @@ npm start
 - 自动文件类型识别
 - 错误处理和日志记录
 - 支持热重载开发（使用nodemon）
+
+## 📁 目录结构
+
+### 图片分类目录
+```
+PublicAssets/photo/
+├── Documentary/     # 纪实类图片
+├── landscapes/      # 风景类图片
+├── Meeting/         # 会议类图片
+├── people/          # 人物类图片
+└── wedding/         # 婚礼类图片
+```
+
+### 支持的分类
+- **Documentary** (纪实)
+- **landscapes** (风景)
+- **Meeting** (会议)
+- **people** (人物)
+- **wedding** (婚礼)
