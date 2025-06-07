@@ -10,6 +10,11 @@ const __dirname = path.dirname(__filename);
 const app = express();
 const PORT = process.env.PORT || 3001;
 
+// 媒体文件存储路径配置 - 支持环境变量配置
+const MEDIA_BASE_PATH = process.env.MEDIA_BASE_PATH || path.join(__dirname, 'PublicAssets');
+const PHOTO_PATH = path.join(MEDIA_BASE_PATH, 'photo');
+const VIDEO_PATH = path.join(MEDIA_BASE_PATH, 'video');
+
 // 图片分类配置
 const PHOTO_CATEGORIES = {
   'Documentary': '纪实',
@@ -19,26 +24,51 @@ const PHOTO_CATEGORIES = {
   'wedding': '婚礼'
 };
 
+// 视频分类配置
+const VIDEO_CATEGORIES = {
+  'activity': '活动',
+  'TVC': '宣传片', 
+  'short_video': '短视频'
+};
+
 // 中间件
 app.use(cors());
 app.use(express.json());
 
-// 静态文件服务 - 提供PublicAssets中的文件访问
-app.use('/assets', express.static(path.join(__dirname, 'PublicAssets')));
+// 静态文件服务 - 提供媒体文件访问
+app.use('/assets', express.static(MEDIA_BASE_PATH));
+
+// 确保媒体目录存在
+function ensureDirectoryExists(dirPath) {
+  if (!fs.existsSync(dirPath)) {
+    fs.mkdirSync(dirPath, { recursive: true });
+    console.log(`📁 创建目录: ${dirPath}`);
+  }
+}
+
+// 初始化媒体目录
+ensureDirectoryExists(PHOTO_PATH);
+ensureDirectoryExists(VIDEO_PATH);
+
+// 初始化分类目录
+for (const categoryKey of Object.keys(PHOTO_CATEGORIES)) {
+  ensureDirectoryExists(path.join(PHOTO_PATH, categoryKey));
+}
+for (const categoryKey of Object.keys(VIDEO_CATEGORIES)) {
+  ensureDirectoryExists(path.join(VIDEO_PATH, categoryKey));
+}
 
 // 获取图片分类列表
 app.get('/api/photo-categories', (req, res) => {
   try {
-    const photoDir = path.join(__dirname, 'PublicAssets', 'photo');
-    
-    if (!fs.existsSync(photoDir)) {
+    if (!fs.existsSync(PHOTO_PATH)) {
       return res.json([]);
     }
 
     const categories = [];
     
     for (const [categoryKey, categoryName] of Object.entries(PHOTO_CATEGORIES)) {
-      const categoryPath = path.join(photoDir, categoryKey);
+      const categoryPath = path.join(PHOTO_PATH, categoryKey);
       
       if (fs.existsSync(categoryPath) && fs.statSync(categoryPath).isDirectory()) {
         // 获取该分类下的图片文件
@@ -75,6 +105,53 @@ app.get('/api/photo-categories', (req, res) => {
   }
 });
 
+// 获取视频分类列表
+app.get('/api/video-categories', (req, res) => {
+  try {
+    if (!fs.existsSync(VIDEO_PATH)) {
+      return res.json([]);
+    }
+
+    const categories = [];
+    
+    for (const [categoryKey, categoryName] of Object.entries(VIDEO_CATEGORIES)) {
+      const categoryPath = path.join(VIDEO_PATH, categoryKey);
+      
+      if (fs.existsSync(categoryPath) && fs.statSync(categoryPath).isDirectory()) {
+        // 获取该分类下的视频文件
+        const files = fs.readdirSync(categoryPath);
+        const videoFiles = files.filter(file => {
+          const ext = path.extname(file).toLowerCase();
+          return ['.mp4', '.avi', '.mov', '.wmv', '.flv', '.webm', '.mkv'].includes(ext);
+        });
+
+        // 获取第一个视频作为封面
+        let coverVideo = null;
+        if (videoFiles.length > 0) {
+          const firstVideo = videoFiles[0];
+          coverVideo = {
+            name: firstVideo,
+            url: `/assets/video/${categoryKey}/${firstVideo}`
+          };
+        }
+
+        categories.push({
+          id: categoryKey,
+          name: categoryName,
+          englishName: categoryKey,
+          videoCount: videoFiles.length,
+          coverVideo: coverVideo
+        });
+      }
+    }
+
+    res.json(categories);
+  } catch (error) {
+    console.error('获取视频分类失败:', error);
+    res.status(500).json({ error: '获取视频分类失败' });
+  }
+});
+
 // 获取某个分类下的所有图片
 app.get('/api/photos/:category', (req, res) => {
   try {
@@ -85,7 +162,7 @@ app.get('/api/photos/:category', (req, res) => {
       return res.status(404).json({ error: '分类不存在' });
     }
 
-    const categoryDir = path.join(__dirname, 'PublicAssets', 'photo', category);
+    const categoryDir = path.join(PHOTO_PATH, category);
     
     if (!fs.existsSync(categoryDir)) {
       return res.json([]);
@@ -114,12 +191,49 @@ app.get('/api/photos/:category', (req, res) => {
   }
 });
 
+// 获取某个分类下的所有视频
+app.get('/api/videos/:category', (req, res) => {
+  try {
+    const category = req.params.category;
+    
+    // 验证分类是否有效
+    if (!VIDEO_CATEGORIES[category]) {
+      return res.status(404).json({ error: '视频分类不存在' });
+    }
+
+    const categoryDir = path.join(VIDEO_PATH, category);
+    
+    if (!fs.existsSync(categoryDir)) {
+      return res.json([]);
+    }
+
+    const files = fs.readdirSync(categoryDir);
+    const videoFiles = files.filter(file => {
+      const ext = path.extname(file).toLowerCase();
+      return ['.mp4', '.avi', '.mov', '.wmv', '.flv', '.webm', '.mkv'].includes(ext);
+    });
+
+    const videos = videoFiles.map(file => ({
+      id: `${category}_${Date.now()}_${Math.random()}`,
+      name: file,
+      url: `/assets/video/${category}/${file}`,
+      size: fs.statSync(path.join(categoryDir, file)).size,
+      type: 'video',
+      category: category,
+      categoryName: VIDEO_CATEGORIES[category]
+    }));
+
+    res.json(videos);
+  } catch (error) {
+    console.error('获取分类视频失败:', error);
+    res.status(500).json({ error: '获取分类视频失败' });
+  }
+});
+
 // 获取所有照片列表（保持向后兼容，现在从所有分类中获取）
 app.get('/api/photos', (req, res) => {
   try {
-    const photoDir = path.join(__dirname, 'PublicAssets', 'photo');
-    
-    if (!fs.existsSync(photoDir)) {
+    if (!fs.existsSync(PHOTO_PATH)) {
       return res.json([]);
     }
 
@@ -127,7 +241,7 @@ app.get('/api/photos', (req, res) => {
 
     // 遍历所有分类目录
     for (const [categoryKey, categoryName] of Object.entries(PHOTO_CATEGORIES)) {
-      const categoryPath = path.join(photoDir, categoryKey);
+      const categoryPath = path.join(PHOTO_PATH, categoryKey);
       
       if (fs.existsSync(categoryPath) && fs.statSync(categoryPath).isDirectory()) {
         const files = fs.readdirSync(categoryPath);
@@ -157,30 +271,62 @@ app.get('/api/photos', (req, res) => {
   }
 });
 
-// 获取所有视频列表
+// 获取所有视频列表（修改为支持分类）
 app.get('/api/videos', (req, res) => {
   try {
-    const videoDir = path.join(__dirname, 'PublicAssets', 'video');
-    
-    if (!fs.existsSync(videoDir)) {
+    if (!fs.existsSync(VIDEO_PATH)) {
       return res.json([]);
     }
 
-    const files = fs.readdirSync(videoDir);
-    const videoFiles = files.filter(file => {
-      const ext = path.extname(file).toLowerCase();
-      return ['.mp4', '.avi', '.mov', '.wmv', '.flv', '.webm', '.mkv'].includes(ext);
-    });
+    const allVideos = [];
 
-    const videos = videoFiles.map(file => ({
-      id: Date.now() + Math.random(),
-      name: file,
-      url: `/assets/video/${file}`,
-      size: fs.statSync(path.join(videoDir, file)).size,
-      type: 'video'
-    }));
+    // 遍历所有视频分类目录
+    for (const [categoryKey, categoryName] of Object.entries(VIDEO_CATEGORIES)) {
+      const categoryPath = path.join(VIDEO_PATH, categoryKey);
+      
+      if (fs.existsSync(categoryPath) && fs.statSync(categoryPath).isDirectory()) {
+        const files = fs.readdirSync(categoryPath);
+        const videoFiles = files.filter(file => {
+          const ext = path.extname(file).toLowerCase();
+          return ['.mp4', '.avi', '.mov', '.wmv', '.flv', '.webm', '.mkv'].includes(ext);
+        });
 
-    res.json(videos);
+        const categoryVideos = videoFiles.map(file => ({
+          id: `${categoryKey}_${Date.now()}_${Math.random()}`,
+          name: file,
+          url: `/assets/video/${categoryKey}/${file}`,
+          size: fs.statSync(path.join(categoryPath, file)).size,
+          type: 'video',
+          category: categoryKey,
+          categoryName: categoryName
+        }));
+
+        allVideos.push(...categoryVideos);
+      }
+    }
+
+    // 如果没有分类视频，检查根目录下的视频（向后兼容）
+    if (allVideos.length === 0) {
+      const files = fs.readdirSync(VIDEO_PATH);
+      const videoFiles = files.filter(file => {
+        const ext = path.extname(file).toLowerCase();
+        return ['.mp4', '.avi', '.mov', '.wmv', '.flv', '.webm', '.mkv'].includes(ext);
+      });
+
+      const rootVideos = videoFiles.map(file => ({
+        id: Date.now() + Math.random(),
+        name: file,
+        url: `/assets/video/${file}`,
+        size: fs.statSync(path.join(VIDEO_PATH, file)).size,
+        type: 'video',
+        category: 'uncategorized',
+        categoryName: '未分类'
+      }));
+
+      allVideos.push(...rootVideos);
+    }
+
+    res.json(allVideos);
   } catch (error) {
     console.error('获取视频列表失败:', error);
     res.status(500).json({ error: '获取视频列表失败' });
@@ -193,13 +339,12 @@ app.get('/api/media', async (req, res) => {
     // 并行获取照片和视频
     const [photosResponse, videosResponse] = await Promise.all([
       new Promise((resolve) => {
-        const photoDir = path.join(__dirname, 'PublicAssets', 'photo');
         const allPhotos = [];
 
-        if (fs.existsSync(photoDir)) {
+        if (fs.existsSync(PHOTO_PATH)) {
           // 遍历所有分类目录
           for (const [categoryKey, categoryName] of Object.entries(PHOTO_CATEGORIES)) {
-            const categoryPath = path.join(photoDir, categoryKey);
+            const categoryPath = path.join(PHOTO_PATH, categoryKey);
             
             if (fs.existsSync(categoryPath) && fs.statSync(categoryPath).isDirectory()) {
               const files = fs.readdirSync(categoryPath);
@@ -225,24 +370,60 @@ app.get('/api/media', async (req, res) => {
         resolve(allPhotos);
       }),
       new Promise((resolve) => {
-        const videoDir = path.join(__dirname, 'PublicAssets', 'video');
-        if (!fs.existsSync(videoDir)) {
+        if (!fs.existsSync(VIDEO_PATH)) {
           resolve([]);
           return;
         }
-        const files = fs.readdirSync(videoDir);
-        const videoFiles = files.filter(file => {
-          const ext = path.extname(file).toLowerCase();
-          return ['.mp4', '.avi', '.mov', '.wmv', '.flv', '.webm', '.mkv'].includes(ext);
-        });
-        const videos = videoFiles.map(file => ({
-          id: `video_${Date.now()}_${Math.random()}`,
-          name: file,
-          url: `/assets/video/${file}`,
-          size: fs.statSync(path.join(videoDir, file)).size,
-          type: 'video'
-        }));
-        resolve(videos);
+        
+        const allVideos = [];
+
+        // 遍历所有视频分类目录
+        for (const [categoryKey, categoryName] of Object.entries(VIDEO_CATEGORIES)) {
+          const categoryPath = path.join(VIDEO_PATH, categoryKey);
+          
+          if (fs.existsSync(categoryPath) && fs.statSync(categoryPath).isDirectory()) {
+            const files = fs.readdirSync(categoryPath);
+            const videoFiles = files.filter(file => {
+              const ext = path.extname(file).toLowerCase();
+              return ['.mp4', '.avi', '.mov', '.wmv', '.flv', '.webm', '.mkv'].includes(ext);
+            });
+
+            const categoryVideos = videoFiles.map(file => ({
+              id: `video_${categoryKey}_${Date.now()}_${Math.random()}`,
+              name: file,
+              url: `/assets/video/${categoryKey}/${file}`,
+              size: fs.statSync(path.join(categoryPath, file)).size,
+              type: 'video',
+              category: categoryKey,
+              categoryName: categoryName
+            }));
+
+            allVideos.push(...categoryVideos);
+          }
+        }
+
+        // 如果没有分类视频，检查根目录（向后兼容）
+        if (allVideos.length === 0) {
+          const files = fs.readdirSync(VIDEO_PATH);
+          const videoFiles = files.filter(file => {
+            const ext = path.extname(file).toLowerCase();
+            return ['.mp4', '.avi', '.mov', '.wmv', '.flv', '.webm', '.mkv'].includes(ext);
+          });
+          
+          const rootVideos = videoFiles.map(file => ({
+            id: `video_${Date.now()}_${Math.random()}`,
+            name: file,
+            url: `/assets/video/${file}`,
+            size: fs.statSync(path.join(VIDEO_PATH, file)).size,
+            type: 'video',
+            category: 'uncategorized',
+            categoryName: '未分类'
+          }));
+          
+          allVideos.push(...rootVideos);
+        }
+
+        resolve(allVideos);
       })
     ]);
 
@@ -259,7 +440,10 @@ app.get('/api/health', (req, res) => {
   res.json({ 
     status: 'OK', 
     message: '视频照片服务运行正常',
-    timestamp: new Date().toISOString()
+    timestamp: new Date().toISOString(),
+    mediaPath: MEDIA_BASE_PATH,
+    photoCategories: Object.keys(PHOTO_CATEGORIES),
+    videoCategories: Object.keys(VIDEO_CATEGORIES)
   });
 });
 
@@ -267,13 +451,17 @@ app.get('/api/health', (req, res) => {
 app.listen(PORT, () => {
   console.log(`🚀 视频照片后端服务启动成功！`);
   console.log(`📍 服务地址: http://localhost:${PORT}`);
-  console.log(`📁 静态文件目录: ${path.join(__dirname, 'PublicAssets')}`);
+  console.log(`📁 媒体文件目录: ${MEDIA_BASE_PATH}`);
+  console.log(`📷 图片目录: ${PHOTO_PATH}`);
+  console.log(`🎬 视频目录: ${VIDEO_PATH}`);
   console.log(`📊 API端点:`);
   console.log(`   - GET /api/health - 健康检查`);
   console.log(`   - GET /api/photo-categories - 获取图片分类`);
+  console.log(`   - GET /api/video-categories - 获取视频分类`);
   console.log(`   - GET /api/photos/:category - 获取分类图片`);
+  console.log(`   - GET /api/videos/:category - 获取分类视频`);
   console.log(`   - GET /api/photos - 获取所有照片`);
-  console.log(`   - GET /api/videos - 获取视频列表`);
+  console.log(`   - GET /api/videos - 获取所有视频`);
   console.log(`   - GET /api/media - 获取所有媒体文件`);
   console.log(`   - GET /assets/* - 静态文件访问`);
 }); 
