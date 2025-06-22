@@ -32,59 +32,67 @@ const VIDEO_CATEGORIES = {
   'short_video': '短视频'
 };
 
-// 中间件 - 优化CORS配置
+// 中间件 - 安全的CORS配置
+const allowedOrigins = [
+  'http://localhost:5173',     // Vite开发服务器
+  'http://localhost:4173',     // Vite预览服务器
+  'http://127.0.0.1:5173',     // 本地IP
+  'http://127.0.0.1:4173',     // 本地IP预览
+  'http://xiangbai.cc',   // 您的生产域名（请替换为实际域名）
+  'http://xiangbai.cc'     // 您的生产域名HTTP版本
+];
+
 app.use(cors({
   origin: function (origin, callback) {
-    // 允许无origin的请求（如移动应用、Postman等）
+    // 允许没有origin的请求（如移动应用、Postman等）
     if (!origin) return callback(null, true);
     
-    // 允许的源列表
-    const allowedOrigins = [
-      'http://localhost:3000',
-      'http://127.0.0.1:3000', 
-      'http://114.55.73.26:3000',
-      'http://114.55.73.26',
-      'https://114.55.73.26',
-      'http://114.55.73.26:80',
-      'https://114.55.73.26:443'
-    ];
-    
-    // 检查origin是否在允许列表中，或者允许所有（开发环境）
-    if (allowedOrigins.indexOf(origin) !== -1 || process.env.NODE_ENV !== 'production') {
+    // 检查origin是否在允许列表中
+    if (allowedOrigins.indexOf(origin) !== -1) {
       callback(null, true);
     } else {
-      console.log('CORS blocked origin:', origin);
+      console.log(`🚫 CORS blocked origin: ${origin}`);
       callback(new Error('Not allowed by CORS'));
     }
   },
   credentials: true,
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'HEAD'],
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'HEAD', 'PATCH'],
   allowedHeaders: [
     'Content-Type', 
     'Authorization', 
-    'Accept',
-    'Origin',
-    'X-Requested-With',
-    'Range'
+    'Accept', 
+    'Origin', 
+    'X-Requested-With', 
+    'Range',
+    'Cache-Control',
+    'Pragma'
   ],
   exposedHeaders: [
     'Content-Range',
-    'Accept-Ranges',
+    'Accept-Ranges', 
     'Content-Length',
-    'Content-Type'
+    'Content-Type',
+    'Cache-Control',
+    'Last-Modified',
+    'ETag'
   ],
-  optionsSuccessStatus: 200 // 支持旧版浏览器
+  optionsSuccessStatus: 200,
+  preflightContinue: false
 }));
 app.use(express.json());
 
-// 额外的CORS处理中间件
+// 额外的CORS处理中间件 - 更安全的版本
 app.use((req, res, next) => {
-  // 设置CORS头
-  res.header('Access-Control-Allow-Origin', req.headers.origin || '*');
-  res.header('Access-Control-Allow-Credentials', 'true');
-  res.header('Access-Control-Allow-Methods', 'GET,HEAD,PUT,PATCH,POST,DELETE,OPTIONS');
-  res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, Accept, Origin, X-Requested-With, Range');
-  res.header('Access-Control-Expose-Headers', 'Content-Range, Accept-Ranges, Content-Length, Content-Type');
+  const origin = req.headers.origin;
+  
+  // 只为允许的源设置CORS头
+  if (!origin || allowedOrigins.includes(origin)) {
+    res.header('Access-Control-Allow-Origin', origin || '*');
+    res.header('Access-Control-Allow-Credentials', 'true');
+    res.header('Access-Control-Allow-Methods', 'GET,HEAD,PUT,PATCH,POST,DELETE,OPTIONS');
+    res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, Accept, Origin, X-Requested-With, Range');
+    res.header('Access-Control-Expose-Headers', 'Content-Range, Accept-Ranges, Content-Length, Content-Type');
+  }
   
   // 处理预检请求
   if (req.method === 'OPTIONS') {
