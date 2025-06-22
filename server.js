@@ -130,7 +130,8 @@ app.use('/assets', express.static(MEDIA_BASE_PATH, {
 }));
 
 // 优化后的视频文件访问
-app.use('/assets/optimized', express.static('/data/media/optimized', {
+const OPTIMIZED_STATIC_PATH = process.env.OPTIMIZED_PATH || '/data/media/optimized';
+app.use('/assets/optimized', express.static(OPTIMIZED_STATIC_PATH, {
   acceptRanges: true,
   maxAge: '1d',
   etag: true,
@@ -144,7 +145,8 @@ app.use('/assets/optimized', express.static('/data/media/optimized', {
 }));
 
 // 视频缩略图访问
-app.use('/assets/thumbnails', express.static('/data/media/thumbnails', {
+const THUMBNAIL_STATIC_PATH = process.env.THUMBNAIL_PATH || '/data/media/thumbnails';
+app.use('/assets/thumbnails', express.static(THUMBNAIL_STATIC_PATH, {
   maxAge: '7d',
   etag: true,
   lastModified: true,
@@ -380,7 +382,10 @@ app.get('/api/videos/:category', (req, res) => {
         category: category,
         categoryName: VIDEO_CATEGORIES[category],
         optimizedVersions: optimizedVersions,
-        thumbnail: thumbnail
+        thumbnail: thumbnail,
+        // 添加流媒体URL和视频信息URL
+        streamUrl: `/api/stream/${category}/${file}`,
+        infoUrl: `/api/video-info/${category}/${file}`
       };
     });
 
@@ -704,10 +709,14 @@ app.get('/api/optimized/:category/:filename', (req, res) => {
     const { category, filename } = req.params;
     const quality = req.query.quality || '480p'; // 默认480p
     
+    console.log(`🎯 请求优化视频: category=${category}, filename=${filename}, quality=${quality}`);
+    
     const videoName = path.basename(filename, path.extname(filename));
     const videoExt = path.extname(filename);
     const optimizedFileName = `${videoName}_${quality}${videoExt}`;
-    const optimizedPath = path.join(OPTIMIZED_PATH, category, optimizedFileName);
+    const optimizedPath = path.join('/data/media/optimized', category, optimizedFileName);
+    
+    console.log(`📁 查找优化文件: ${optimizedPath}`);
     
     if (fs.existsSync(optimizedPath)) {
       // 返回优化后的视频（使用与原始流媒体相同的逻辑）
@@ -785,18 +794,18 @@ app.get('/api/video-info/:category/:filename', (req, res) => {
     
     // 检查可用的优化版本
     const availableQualities = [];
-    const qualities = ['480p', '720p', '1080p'];
+    const qualities = ['240p', '360p', '480p', '720p'];
     
     for (const quality of qualities) {
       const optimizedFileName = `${videoName}_${quality}${path.extname(filename)}`;
-      const optimizedPath = path.join(OPTIMIZED_PATH, category, optimizedFileName);
+      const optimizedPath = path.join('/data/media/optimized', category, optimizedFileName);
       if (fs.existsSync(optimizedPath)) {
         availableQualities.push(quality);
       }
     }
     
     // 检查缩略图
-    const thumbnailPath = path.join(THUMBNAIL_PATH, category, `${videoName}.jpg`);
+    const thumbnailPath = path.join('/data/media/thumbnails', category, `${videoName}.jpg`);
     const hasThumbnail = fs.existsSync(thumbnailPath);
     
     const videoInfo = {
