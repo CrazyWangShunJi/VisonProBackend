@@ -180,6 +180,7 @@ function ensureDirectoryExists(dirPath) {
 // 初始化媒体目录
 ensureDirectoryExists(PHOTO_PATH);
 ensureDirectoryExists(VIDEO_PATH);
+ensureDirectoryExists(THUMBNAIL_PATH);
 
 // 初始化分类目录
 for (const categoryKey of Object.keys(PHOTO_CATEGORIES)) {
@@ -187,6 +188,7 @@ for (const categoryKey of Object.keys(PHOTO_CATEGORIES)) {
 }
 for (const categoryKey of Object.keys(VIDEO_CATEGORIES)) {
   ensureDirectoryExists(path.join(VIDEO_PATH, categoryKey));
+  ensureDirectoryExists(path.join(THUMBNAIL_PATH, categoryKey));
 }
 
 // 获取图片分类列表
