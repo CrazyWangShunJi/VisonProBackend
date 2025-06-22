@@ -568,10 +568,11 @@ app.get('/api/health', (req, res) => {
   });
 });
 
-// 启动服务器
-app.listen(PORT, () => {
+// 启动服务器 - 绑定到所有网络接口
+app.listen(PORT, '0.0.0.0', () => {
   console.log(`🚀 视频照片后端服务启动成功！`);
-  console.log(`📍 服务地址: http://localhost:${PORT}`);
+  console.log(`📍 本地地址: http://localhost:${PORT}`);
+  console.log(`📍 外网地址: http://0.0.0.0:${PORT}`);
   console.log(`📁 媒体文件目录: ${MEDIA_BASE_PATH}`);
   console.log(`📷 图片目录: ${PHOTO_PATH}`);
   console.log(`🎬 视频目录: ${VIDEO_PATH}`);
@@ -585,4 +586,5 @@ app.listen(PORT, () => {
   console.log(`   - GET /api/videos - 获取所有视频`);
   console.log(`   - GET /api/media - 获取所有媒体文件`);
   console.log(`   - GET /assets/* - 静态文件访问`);
+  console.log(`🌐 服务器已绑定到所有网络接口，可以接受外部连接`);
 }); 
