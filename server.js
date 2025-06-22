@@ -4,6 +4,7 @@ import cors from 'cors';
 import path from 'path';
 import fs from 'fs';
 import { fileURLToPath } from 'url';
+import { streamingOptimizer } from './video-streaming-optimizer.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -603,10 +604,11 @@ app.get('/api/media', async (req, res) => {
   }
 });
 
-// 视频流媒体播放接口 - 优化版本
+// 视频流媒体播放接口 - 智能优化版本
 app.get('/api/stream/:category/:filename', (req, res) => {
   try {
     const { category, filename } = req.params;
+    const quality = req.query.quality || '480p';
     const videoPath = path.join(VIDEO_PATH, category, filename);
     
     // 检查文件是否存在
@@ -618,27 +620,40 @@ app.get('/api/stream/:category/:filename', (req, res) => {
     const fileSize = stat.size;
     const range = req.headers.range;
     
-    console.log(`🎬 请求视频流: ${filename}, 文件大小: ${(fileSize / 1024 / 1024).toFixed(2)}MB`);
+    // 获取客户端信息和网络状态
+    const clientId = streamingOptimizer.getClientId(req);
+    const networkSpeed = streamingOptimizer.detectNetworkQuality(clientId);
+    
+    console.log(`🎬 请求视频流: ${filename}, 质量: ${quality}, 网络: ${networkSpeed}, 文件大小: ${(fileSize / 1024 / 1024).toFixed(2)}MB`);
+    
+    // 获取优化的响应头
+    const optimizedHeaders = streamingOptimizer.getOptimizedHeaders(fileSize, quality, networkSpeed);
     
     if (range) {
       // 支持范围请求，实现视频流播放
       const parts = range.replace(/bytes=/, "").split("-");
       const start = parseInt(parts[0], 10);
-      const end = parts[1] ? parseInt(parts[1], 10) : Math.min(start + 1024 * 1024, fileSize - 1); // 1MB chunks
-      const chunksize = (end - start) + 1;
       
-      console.log(`📦 发送视频块: ${start}-${end}/${fileSize} (${(chunksize / 1024).toFixed(2)}KB)`);
+      // 智能计算分片大小
+      const chunkSize = streamingOptimizer.calculateChunkSize(quality, networkSpeed, { start, end: parts[1] ? parseInt(parts[1], 10) : undefined });
+      const end = parts[1] ? parseInt(parts[1], 10) : Math.min(start + chunkSize, fileSize - 1);
+      const actualChunkSize = (end - start) + 1;
       
-      const file = fs.createReadStream(videoPath, { start, end, highWaterMark: 64 * 1024 }); // 64KB buffer
+      console.log(`📦 智能视频块: ${start}-${end}/${fileSize} (${(actualChunkSize / 1024).toFixed(2)}KB), 网络: ${networkSpeed}`);
+      
+      // 创建优化的流
+      const file = streamingOptimizer.createOptimizedStream(videoPath, {
+        start,
+        end,
+        quality,
+        networkSpeed,
+        clientId
+      });
       
       const head = {
         'Content-Range': `bytes ${start}-${end}/${fileSize}`,
-        'Accept-Ranges': 'bytes',
-        'Content-Length': chunksize,
-        'Content-Type': 'video/mp4',
-        'Cache-Control': 'public, max-age=3600', // 1小时缓存
-        'Connection': 'keep-alive',
-        'Transfer-Encoding': 'chunked'
+        'Content-Length': actualChunkSize,
+        ...optimizedHeaders
       };
       
       res.writeHead(206, head);
@@ -654,19 +669,21 @@ app.get('/api/stream/:category/:filename', (req, res) => {
       file.pipe(res);
     } else {
       // 普通请求 - 也使用流式传输
-      console.log(`📺 发送完整视频: ${filename}`);
+      console.log(`📺 发送完整视频: ${filename}, 网络: ${networkSpeed}`);
       
       const head = {
         'Content-Length': fileSize,
-        'Content-Type': 'video/mp4',
-        'Accept-Ranges': 'bytes',
-        'Cache-Control': 'public, max-age=3600',
-        'Connection': 'keep-alive'
+        ...optimizedHeaders
       };
       
       res.writeHead(200, head);
       
-      const stream = fs.createReadStream(videoPath, { highWaterMark: 64 * 1024 });
+      // 创建优化的流
+      const stream = streamingOptimizer.createOptimizedStream(videoPath, {
+        quality,
+        networkSpeed,
+        clientId
+      });
       
       stream.on('error', (err) => {
         console.error('视频流读取错误:', err);
@@ -830,6 +847,41 @@ app.get('/api/video-info/:category/:filename', (req, res) => {
   } catch (error) {
     console.error('获取视频信息失败:', error);
     res.status(500).json({ error: '获取视频信息失败' });
+  }
+});
+
+// 网络质量检测和推荐接口
+app.get('/api/network-quality', (req, res) => {
+  try {
+    const clientId = streamingOptimizer.getClientId(req);
+    const networkSpeed = streamingOptimizer.detectNetworkQuality(clientId);
+    const availableQualities = ['240p', '360p', '480p', '720p'];
+    const recommendedQuality = streamingOptimizer.getRecommendedQuality(clientId, availableQualities);
+    
+    res.json({
+      clientId: clientId.slice(0, 8) + '...', // 部分显示以保护隐私
+      networkSpeed,
+      recommendedQuality,
+      availableQualities,
+      timestamp: new Date().toISOString()
+    });
+  } catch (error) {
+    console.error('网络质量检测失败:', error);
+    res.status(500).json({ error: '网络质量检测失败' });
+  }
+});
+
+// 流媒体统计接口
+app.get('/api/streaming-stats', (req, res) => {
+  try {
+    const stats = streamingOptimizer.getStats();
+    res.json({
+      ...stats,
+      timestamp: new Date().toISOString()
+    });
+  } catch (error) {
+    console.error('获取流媒体统计失败:', error);
+    res.status(500).json({ error: '获取流媒体统计失败' });
   }
 });
 
