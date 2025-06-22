@@ -32,20 +32,68 @@ const VIDEO_CATEGORIES = {
   'short_video': '短视频'
 };
 
-// 中间件
+// 中间件 - 优化CORS配置
 app.use(cors({
-  origin: [
-    'http://localhost:3000',
-    'http://127.0.0.1:3000', 
-    'http://114.55.73.26:3000',
-    'http://114.55.73.26',
-    '*' // 允许所有源（生产环境建议限制具体域名）
-  ],
+  origin: function (origin, callback) {
+    // 允许无origin的请求（如移动应用、Postman等）
+    if (!origin) return callback(null, true);
+    
+    // 允许的源列表
+    const allowedOrigins = [
+      'http://localhost:3000',
+      'http://127.0.0.1:3000', 
+      'http://114.55.73.26:3000',
+      'http://114.55.73.26',
+      'https://114.55.73.26',
+      'http://114.55.73.26:80',
+      'https://114.55.73.26:443'
+    ];
+    
+    // 检查origin是否在允许列表中，或者允许所有（开发环境）
+    if (allowedOrigins.indexOf(origin) !== -1 || process.env.NODE_ENV !== 'production') {
+      callback(null, true);
+    } else {
+      console.log('CORS blocked origin:', origin);
+      callback(new Error('Not allowed by CORS'));
+    }
+  },
   credentials: true,
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'Accept']
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'HEAD'],
+  allowedHeaders: [
+    'Content-Type', 
+    'Authorization', 
+    'Accept',
+    'Origin',
+    'X-Requested-With',
+    'Range'
+  ],
+  exposedHeaders: [
+    'Content-Range',
+    'Accept-Ranges',
+    'Content-Length',
+    'Content-Type'
+  ],
+  optionsSuccessStatus: 200 // 支持旧版浏览器
 }));
 app.use(express.json());
+
+// 额外的CORS处理中间件
+app.use((req, res, next) => {
+  // 设置CORS头
+  res.header('Access-Control-Allow-Origin', req.headers.origin || '*');
+  res.header('Access-Control-Allow-Credentials', 'true');
+  res.header('Access-Control-Allow-Methods', 'GET,HEAD,PUT,PATCH,POST,DELETE,OPTIONS');
+  res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, Accept, Origin, X-Requested-With, Range');
+  res.header('Access-Control-Expose-Headers', 'Content-Range, Accept-Ranges, Content-Length, Content-Type');
+  
+  // 处理预检请求
+  if (req.method === 'OPTIONS') {
+    res.status(200).end();
+    return;
+  }
+  
+  next();
+});
 
 // 静态文件服务 - 提供媒体文件访问，启用流媒体传输
 app.use('/assets', express.static(MEDIA_BASE_PATH, {
