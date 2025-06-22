@@ -33,11 +33,34 @@ const VIDEO_CATEGORIES = {
 };
 
 // 中间件
-app.use(cors());
+app.use(cors({
+  origin: [
+    'http://localhost:3000',
+    'http://127.0.0.1:3000', 
+    'http://114.55.73.26:3000',
+    'http://114.55.73.26',
+    '*' // 允许所有源（生产环境建议限制具体域名）
+  ],
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'Accept']
+}));
 app.use(express.json());
 
 // 静态文件服务 - 提供媒体文件访问
 app.use('/assets', express.static(MEDIA_BASE_PATH));
+
+// 添加请求日志中间件
+app.use((req, res, next) => {
+  console.log(`${new Date().toISOString()} - ${req.method} ${req.url}`);
+  next();
+});
+
+// 添加错误处理中间件
+app.use((err, req, res, next) => {
+  console.error('服务器错误:', err);
+  res.status(500).json({ error: '服务器内部错误' });
+});
 
 // 确保媒体目录存在
 function ensureDirectoryExists(dirPath) {
