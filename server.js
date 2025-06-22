@@ -47,8 +47,29 @@ app.use(cors({
 }));
 app.use(express.json());
 
-// 静态文件服务 - 提供媒体文件访问
-app.use('/assets', express.static(MEDIA_BASE_PATH));
+// 静态文件服务 - 提供媒体文件访问，启用流媒体传输
+app.use('/assets', express.static(MEDIA_BASE_PATH, {
+  // 启用流媒体传输
+  acceptRanges: true,
+  // 设置缓存策略
+  maxAge: '1d', // 1天缓存
+  // 启用Etag
+  etag: true,
+  // 启用Last-Modified
+  lastModified: true,
+  // 设置缓存控制
+  setHeaders: (res, path) => {
+    // 对视频文件设置特殊的缓存策略
+    if (path.match(/\.(mp4|avi|mov|wmv|flv|webm|mkv)$/i)) {
+      res.setHeader('Cache-Control', 'public, max-age=86400'); // 1天
+      res.setHeader('Accept-Ranges', 'bytes'); // 支持范围请求
+    }
+    // 对图片文件设置缓存
+    if (path.match(/\.(jpg|jpeg|png|gif|webp|bmp)$/i)) {
+      res.setHeader('Cache-Control', 'public, max-age=604800'); // 7天
+    }
+  }
+}));
 
 // 添加请求日志中间件
 app.use((req, res, next) => {
@@ -456,6 +477,82 @@ app.get('/api/media', async (req, res) => {
   } catch (error) {
     console.error('获取媒体文件失败:', error);
     res.status(500).json({ error: '获取媒体文件失败' });
+  }
+});
+
+// 视频流媒体播放接口
+app.get('/api/stream/:category/:filename', (req, res) => {
+  try {
+    const { category, filename } = req.params;
+    const videoPath = path.join(VIDEO_PATH, category, filename);
+    
+    // 检查文件是否存在
+    if (!fs.existsSync(videoPath)) {
+      return res.status(404).json({ error: '视频文件不存在' });
+    }
+    
+    const stat = fs.statSync(videoPath);
+    const fileSize = stat.size;
+    const range = req.headers.range;
+    
+    if (range) {
+      // 支持范围请求，实现视频流播放
+      const parts = range.replace(/bytes=/, "").split("-");
+      const start = parseInt(parts[0], 10);
+      const end = parts[1] ? parseInt(parts[1], 10) : fileSize - 1;
+      const chunksize = (end - start) + 1;
+      const file = fs.createReadStream(videoPath, { start, end });
+      const head = {
+        'Content-Range': `bytes ${start}-${end}/${fileSize}`,
+        'Accept-Ranges': 'bytes',
+        'Content-Length': chunksize,
+        'Content-Type': 'video/mp4',
+        'Cache-Control': 'public, max-age=86400'
+      };
+      res.writeHead(206, head);
+      file.pipe(res);
+    } else {
+      // 普通请求
+      const head = {
+        'Content-Length': fileSize,
+        'Content-Type': 'video/mp4',
+        'Accept-Ranges': 'bytes',
+        'Cache-Control': 'public, max-age=86400'
+      };
+      res.writeHead(200, head);
+      fs.createReadStream(videoPath).pipe(res);
+    }
+  } catch (error) {
+    console.error('视频流播放失败:', error);
+    res.status(500).json({ error: '视频流播放失败' });
+  }
+});
+
+// 获取视频信息接口
+app.get('/api/video-info/:category/:filename', (req, res) => {
+  try {
+    const { category, filename } = req.params;
+    const videoPath = path.join(VIDEO_PATH, category, filename);
+    
+    if (!fs.existsSync(videoPath)) {
+      return res.status(404).json({ error: '视频文件不存在' });
+    }
+    
+    const stat = fs.statSync(videoPath);
+    const videoInfo = {
+      filename: filename,
+      size: stat.size,
+      mtime: stat.mtime,
+      category: category,
+      categoryName: VIDEO_CATEGORIES[category] || category,
+      streamUrl: `/api/stream/${category}/${filename}`,
+      directUrl: `/assets/video/${category}/${filename}`
+    };
+    
+    res.json(videoInfo);
+  } catch (error) {
+    console.error('获取视频信息失败:', error);
+    res.status(500).json({ error: '获取视频信息失败' });
   }
 });
 
