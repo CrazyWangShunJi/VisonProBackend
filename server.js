@@ -15,6 +15,8 @@ const PORT = process.env.PORT || 3001;
 const MEDIA_BASE_PATH = process.env.MEDIA_BASE_PATH || path.join(__dirname, 'PublicAssets');
 const PHOTO_PATH = path.join(MEDIA_BASE_PATH, 'photo');
 const VIDEO_PATH = path.join(MEDIA_BASE_PATH, 'video');
+const THUMBNAIL_PATH = path.join(MEDIA_BASE_PATH, 'thumbnails');
+const OPTIMIZED_PATH = path.join(MEDIA_BASE_PATH, 'optimized');
 
 // 图片分类配置
 const PHOTO_CATEGORIES = {
@@ -117,12 +119,38 @@ app.use('/assets', express.static(MEDIA_BASE_PATH, {
   setHeaders: (res, path) => {
     // 对视频文件设置特殊的缓存策略
     if (path.match(/\.(mp4|avi|mov|wmv|flv|webm|mkv)$/i)) {
-      res.setHeader('Cache-Control', 'public, max-age=86400'); // 1天
+      res.setHeader('Cache-Control', 'public, max-age=3600'); // 1小时缓存，减少服务器压力
       res.setHeader('Accept-Ranges', 'bytes'); // 支持范围请求
     }
     // 对图片文件设置缓存
     if (path.match(/\.(jpg|jpeg|png|gif|webp|bmp)$/i)) {
       res.setHeader('Cache-Control', 'public, max-age=604800'); // 7天
+    }
+  }
+}));
+
+// 优化后的视频文件访问
+app.use('/assets/optimized', express.static('/data/media/optimized', {
+  acceptRanges: true,
+  maxAge: '1d',
+  etag: true,
+  lastModified: true,
+  setHeaders: (res, path) => {
+    if (path.match(/\.(mp4|avi|mov|wmv|flv|webm|mkv)$/i)) {
+      res.setHeader('Cache-Control', 'public, max-age=3600');
+      res.setHeader('Accept-Ranges', 'bytes');
+    }
+  }
+}));
+
+// 视频缩略图访问
+app.use('/assets/thumbnails', express.static('/data/media/thumbnails', {
+  maxAge: '7d',
+  etag: true,
+  lastModified: true,
+  setHeaders: (res, path) => {
+    if (path.match(/\.(jpg|jpeg|png|gif|webp|bmp)$/i)) {
+      res.setHeader('Cache-Control', 'public, max-age=604800');
     }
   }
 }));
@@ -314,15 +342,47 @@ app.get('/api/videos/:category', (req, res) => {
       return ['.mp4', '.avi', '.mov', '.wmv', '.flv', '.webm', '.mkv'].includes(ext);
     });
 
-    const videos = videoFiles.map(file => ({
-      id: `${category}_${Date.now()}_${Math.random()}`,
-      name: file,
-      url: `/assets/video/${category}/${file}`,
-      size: fs.statSync(path.join(categoryDir, file)).size,
-      type: 'video',
-      category: category,
-      categoryName: VIDEO_CATEGORIES[category]
-    }));
+    const videos = videoFiles.map(file => {
+      const filePath = path.join(categoryDir, file);
+      const fileName = path.parse(file).name;
+      
+      // 检查是否有优化版本
+      const optimizedVersions = [];
+      const optimizedDir = `/data/media/optimized/${category}`;
+      if (fs.existsSync(optimizedDir)) {
+        const qualities = ['480p', '720p', '1080p'];
+        for (const quality of qualities) {
+          const optimizedFile = `${fileName}_${quality}${path.extname(file)}`;
+          const optimizedPath = path.join(optimizedDir, optimizedFile);
+          if (fs.existsSync(optimizedPath)) {
+            optimizedVersions.push({
+              quality: quality,
+              url: `/assets/optimized/${category}/${optimizedFile}`,
+              size: fs.statSync(optimizedPath).size
+            });
+          }
+        }
+      }
+      
+      // 检查缩略图
+      let thumbnail = null;
+      const thumbnailPath = `/data/media/thumbnails/${category}/${fileName}.jpg`;
+      if (fs.existsSync(thumbnailPath)) {
+        thumbnail = `/assets/thumbnails/${category}/${fileName}.jpg`;
+      }
+
+      return {
+        id: `${category}_${Date.now()}_${Math.random()}`,
+        name: file,
+        url: `/assets/video/${category}/${file}`,
+        size: fs.statSync(filePath).size,
+        type: 'video',
+        category: category,
+        categoryName: VIDEO_CATEGORIES[category],
+        optimizedVersions: optimizedVersions,
+        thumbnail: thumbnail
+      };
+    });
 
     res.json(videos);
   } catch (error) {
@@ -536,7 +596,7 @@ app.get('/api/media', async (req, res) => {
   }
 });
 
-// 视频流媒体播放接口
+// 视频流媒体播放接口 - 优化版本
 app.get('/api/stream/:category/:filename', (req, res) => {
   try {
     const { category, filename } = req.params;
@@ -551,36 +611,162 @@ app.get('/api/stream/:category/:filename', (req, res) => {
     const fileSize = stat.size;
     const range = req.headers.range;
     
+    console.log(`🎬 请求视频流: ${filename}, 文件大小: ${(fileSize / 1024 / 1024).toFixed(2)}MB`);
+    
     if (range) {
       // 支持范围请求，实现视频流播放
       const parts = range.replace(/bytes=/, "").split("-");
       const start = parseInt(parts[0], 10);
-      const end = parts[1] ? parseInt(parts[1], 10) : fileSize - 1;
+      const end = parts[1] ? parseInt(parts[1], 10) : Math.min(start + 1024 * 1024, fileSize - 1); // 1MB chunks
       const chunksize = (end - start) + 1;
-      const file = fs.createReadStream(videoPath, { start, end });
+      
+      console.log(`📦 发送视频块: ${start}-${end}/${fileSize} (${(chunksize / 1024).toFixed(2)}KB)`);
+      
+      const file = fs.createReadStream(videoPath, { start, end, highWaterMark: 64 * 1024 }); // 64KB buffer
+      
       const head = {
         'Content-Range': `bytes ${start}-${end}/${fileSize}`,
         'Accept-Ranges': 'bytes',
         'Content-Length': chunksize,
         'Content-Type': 'video/mp4',
-        'Cache-Control': 'public, max-age=86400'
+        'Cache-Control': 'public, max-age=3600', // 1小时缓存
+        'Connection': 'keep-alive',
+        'Transfer-Encoding': 'chunked'
       };
+      
       res.writeHead(206, head);
+      
+      // 错误处理
+      file.on('error', (err) => {
+        console.error('视频流读取错误:', err);
+        if (!res.headersSent) {
+          res.status(500).end();
+        }
+      });
+      
       file.pipe(res);
     } else {
-      // 普通请求
+      // 普通请求 - 也使用流式传输
+      console.log(`📺 发送完整视频: ${filename}`);
+      
       const head = {
         'Content-Length': fileSize,
         'Content-Type': 'video/mp4',
         'Accept-Ranges': 'bytes',
-        'Cache-Control': 'public, max-age=86400'
+        'Cache-Control': 'public, max-age=3600',
+        'Connection': 'keep-alive'
       };
+      
       res.writeHead(200, head);
-      fs.createReadStream(videoPath).pipe(res);
+      
+      const stream = fs.createReadStream(videoPath, { highWaterMark: 64 * 1024 });
+      
+      stream.on('error', (err) => {
+        console.error('视频流读取错误:', err);
+        if (!res.headersSent) {
+          res.status(500).end();
+        }
+      });
+      
+      stream.pipe(res);
     }
   } catch (error) {
     console.error('视频流播放失败:', error);
     res.status(500).json({ error: '视频流播放失败' });
+  }
+});
+
+// 获取视频缩略图接口
+app.get('/api/thumbnail/:category/:filename', (req, res) => {
+  try {
+    const { category, filename } = req.params;
+    const videoName = path.basename(filename, path.extname(filename));
+    const thumbnailPath = path.join(THUMBNAIL_PATH, category, `${videoName}.jpg`);
+    
+    if (fs.existsSync(thumbnailPath)) {
+      // 返回缩略图
+      res.setHeader('Content-Type', 'image/jpeg');
+      res.setHeader('Cache-Control', 'public, max-age=604800'); // 7天缓存
+      fs.createReadStream(thumbnailPath).pipe(res);
+    } else {
+      // 返回默认占位符或404
+      res.status(404).json({ error: '缩略图不存在' });
+    }
+  } catch (error) {
+    console.error('获取视频缩略图失败:', error);
+    res.status(500).json({ error: '获取视频缩略图失败' });
+  }
+});
+
+// 获取优化后的视频接口
+app.get('/api/optimized/:category/:filename', (req, res) => {
+  try {
+    const { category, filename } = req.params;
+    const quality = req.query.quality || '480p'; // 默认480p
+    
+    const videoName = path.basename(filename, path.extname(filename));
+    const videoExt = path.extname(filename);
+    const optimizedFileName = `${videoName}_${quality}${videoExt}`;
+    const optimizedPath = path.join(OPTIMIZED_PATH, category, optimizedFileName);
+    
+    if (fs.existsSync(optimizedPath)) {
+      // 返回优化后的视频（使用与原始流媒体相同的逻辑）
+      const stat = fs.statSync(optimizedPath);
+      const fileSize = stat.size;
+      const range = req.headers.range;
+      
+      console.log(`🎬 请求优化视频: ${optimizedFileName}, 文件大小: ${(fileSize / 1024 / 1024).toFixed(2)}MB`);
+      
+      if (range) {
+        const parts = range.replace(/bytes=/, "").split("-");
+        const start = parseInt(parts[0], 10);
+        const end = parts[1] ? parseInt(parts[1], 10) : Math.min(start + 512 * 1024, fileSize - 1); // 512KB chunks for optimized videos
+        const chunksize = (end - start) + 1;
+        
+        const file = fs.createReadStream(optimizedPath, { start, end, highWaterMark: 32 * 1024 }); // 32KB buffer
+        
+        const head = {
+          'Content-Range': `bytes ${start}-${end}/${fileSize}`,
+          'Accept-Ranges': 'bytes',
+          'Content-Length': chunksize,
+          'Content-Type': 'video/mp4',
+          'Cache-Control': 'public, max-age=7200', // 2小时缓存
+          'Connection': 'keep-alive'
+        };
+        
+        res.writeHead(206, head);
+        file.on('error', (err) => {
+          console.error('优化视频流读取错误:', err);
+          if (!res.headersSent) {
+            res.status(500).end();
+          }
+        });
+        file.pipe(res);
+      } else {
+        const head = {
+          'Content-Length': fileSize,
+          'Content-Type': 'video/mp4',
+          'Accept-Ranges': 'bytes',
+          'Cache-Control': 'public, max-age=7200'
+        };
+        
+        res.writeHead(200, head);
+        const stream = fs.createReadStream(optimizedPath, { highWaterMark: 32 * 1024 });
+        stream.on('error', (err) => {
+          console.error('优化视频流读取错误:', err);
+          if (!res.headersSent) {
+            res.status(500).end();
+          }
+        });
+        stream.pipe(res);
+      }
+    } else {
+      // 如果优化版本不存在，回退到原始视频
+      res.redirect(`/api/stream/${category}/${filename}`);
+    }
+  } catch (error) {
+    console.error('获取优化视频失败:', error);
+    res.status(500).json({ error: '获取优化视频失败' });
   }
 });
 
@@ -595,6 +781,24 @@ app.get('/api/video-info/:category/:filename', (req, res) => {
     }
     
     const stat = fs.statSync(videoPath);
+    const videoName = path.basename(filename, path.extname(filename));
+    
+    // 检查可用的优化版本
+    const availableQualities = [];
+    const qualities = ['480p', '720p', '1080p'];
+    
+    for (const quality of qualities) {
+      const optimizedFileName = `${videoName}_${quality}${path.extname(filename)}`;
+      const optimizedPath = path.join(OPTIMIZED_PATH, category, optimizedFileName);
+      if (fs.existsSync(optimizedPath)) {
+        availableQualities.push(quality);
+      }
+    }
+    
+    // 检查缩略图
+    const thumbnailPath = path.join(THUMBNAIL_PATH, category, `${videoName}.jpg`);
+    const hasThumbnail = fs.existsSync(thumbnailPath);
+    
     const videoInfo = {
       filename: filename,
       size: stat.size,
@@ -602,7 +806,13 @@ app.get('/api/video-info/:category/:filename', (req, res) => {
       category: category,
       categoryName: VIDEO_CATEGORIES[category] || category,
       streamUrl: `/api/stream/${category}/${filename}`,
-      directUrl: `/assets/video/${category}/${filename}`
+      directUrl: `/assets/video/${category}/${filename}`,
+      thumbnailUrl: hasThumbnail ? `/api/thumbnail/${category}/${filename}` : null,
+      availableQualities: availableQualities,
+      optimizedUrls: availableQualities.reduce((urls, quality) => {
+        urls[quality] = `/api/optimized/${category}/${filename}?quality=${quality}`;
+        return urls;
+      }, {})
     };
     
     res.json(videoInfo);
