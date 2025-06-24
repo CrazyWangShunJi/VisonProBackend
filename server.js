@@ -5,6 +5,7 @@ import path from 'path';
 import fs from 'fs';
 import { fileURLToPath } from 'url';
 import { streamingOptimizer } from './video-streaming-optimizer.js';
+import { isVideoFile, isImageFile, checkThumbnailExists, getVideoFileInfo } from './video-utils.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -342,10 +343,7 @@ app.get('/api/videos/:category', (req, res) => {
     }
 
     const files = fs.readdirSync(categoryDir);
-    const videoFiles = files.filter(file => {
-      const ext = path.extname(file).toLowerCase();
-      return ['.mp4', '.avi', '.mov', '.wmv', '.flv', '.webm', '.mkv'].includes(ext);
-    });
+    const videoFiles = files.filter(file => isVideoFile(file));
 
     const videos = videoFiles.map(file => {
       const filePath = path.join(categoryDir, file);

@@ -18,8 +18,8 @@ const VIDEO_CATEGORIES = {
   'short_video': '短视频'
 };
 
-// 支持的视频格式
-const SUPPORTED_VIDEO_FORMATS = ['.mp4', '.avi', '.mov', '.wmv', '.flv', '.webm', '.mkv', '.m4v'];
+// 支持的视频格式（包括大写扩展名）
+const SUPPORTED_VIDEO_FORMATS = ['.mp4', '.MP4', '.avi', '.AVI', '.mov', '.MOV', '.wmv', '.WMV', '.flv', '.FLV', '.webm', '.WEBM', '.mkv', '.MKV', '.m4v', '.M4V'];
 
 /**
  * 确保目录存在
@@ -129,7 +129,7 @@ function getVideoDuration(videoPath) {
  */
 async function generateVideoThumbnail(category, filename) {
   const videoPath = path.join(VIDEO_PATH, category, filename);
-  const fileExt = path.extname(filename).toLowerCase();
+  const fileExt = path.extname(filename);
   const baseName = path.basename(filename, fileExt);
   const thumbnailFilename = `${baseName}.jpg`;
   const thumbnailDir = path.join(THUMBNAIL_PATH, category);
@@ -184,7 +184,7 @@ async function generateCategoryThumbnails(category) {
 
   const files = fs.readdirSync(categoryPath);
   const videoFiles = files.filter(file => 
-    SUPPORTED_VIDEO_FORMATS.includes(path.extname(file).toLowerCase())
+    SUPPORTED_VIDEO_FORMATS.includes(path.extname(file))
   );
 
   console.log(`📁 处理分类 "${category}" - 发现 ${videoFiles.length} 个视频文件`);
