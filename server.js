@@ -14,7 +14,7 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 
 // 媒体文件存储路径配置 - 支持环境变量配置
-const MEDIA_BASE_PATH = process.env.MEDIA_BASE_PATH || path.join(__dirname, 'PublicAssets');
+const MEDIA_BASE_PATH = process.env.MEDIA_BASE_PATH || '/data/media';
 const PHOTO_PATH = path.join(MEDIA_BASE_PATH, 'photo');
 const VIDEO_PATH = path.join(MEDIA_BASE_PATH, 'video');
 const THUMBNAIL_PATH = path.join(MEDIA_BASE_PATH, 'thumbnails');
@@ -167,6 +167,23 @@ app.use('/assets/thumbnails', express.static(THUMBNAIL_STATIC_PATH, {
 app.use((req, res, next) => {
   console.log(`${new Date().toISOString()} - ${req.method} ${req.url}`);
   next();
+});
+
+// 健康检查接口
+app.get('/api/health', (req, res) => {
+  res.json({ 
+    status: 'OK', 
+    message: '后端服务正常运行',
+    timestamp: new Date().toISOString(),
+    port: PORT,
+    paths: {
+      MEDIA_BASE_PATH,
+      PHOTO_PATH,
+      VIDEO_PATH,
+      THUMBNAIL_PATH,
+      OPTIMIZED_PATH
+    }
+  });
 });
 
 // 添加错误处理中间件
