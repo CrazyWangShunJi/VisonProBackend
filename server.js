@@ -11,7 +11,7 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const app = express();
-const PORT = process.env.PORT || 3001;
+const PORT = process.env.PORT || 3000;
 
 // 媒体文件存储路径配置 - 支持环境变量配置
 const MEDIA_BASE_PATH = process.env.MEDIA_BASE_PATH || path.join(__dirname, 'PublicAssets');
@@ -42,8 +42,12 @@ const allowedOrigins = [
   'http://localhost:4173',     // Vite预览服务器
   'http://127.0.0.1:5173',     // 本地IP
   'http://127.0.0.1:4173',     // 本地IP预览
-  'http://xiangbai.cc',   // 您的生产域名（请替换为实际域名）
-  'http://xiangbai.cc'     // 您的生产域名HTTP版本
+  'http://xiangbai.cc',        // 您的生产域名
+  'https://xiangbai.cc',       // HTTPS版本
+  'http://www.xiangbai.cc',    // www版本
+  'https://www.xiangbai.cc',   // www HTTPS版本
+  'http://114.55.73.26',       // 服务器IP
+  'https://114.55.73.26'       // 服务器IP HTTPS版本
 ];
 
 app.use(cors({
