@@ -18,10 +18,10 @@ const VIDEO_PATH = '/data/media/video';
 const OUTPUT_PATH = '/data/media/optimized';
 const THUMBNAIL_PATH = '/data/media/thumbnails';
 
-// 针对网络流播放的优化配置
+// 针对网络流播放的优化配置 - 支持横屏和竖屏自适应
 const STREAMING_PRESETS = {
   '240p': {
-    resolution: '426x240',
+    height: 240,  // 只指定高度，保持原始宽高比
     videoBitrate: '300k',
     audioBitrate: '64k',
     crf: 28,
@@ -32,7 +32,7 @@ const STREAMING_PRESETS = {
     suffix: '_240p'
   },
   '360p': {
-    resolution: '640x360',
+    height: 360,  // 只指定高度，保持原始宽高比
     videoBitrate: '600k',
     audioBitrate: '96k',
     crf: 26,
@@ -43,7 +43,7 @@ const STREAMING_PRESETS = {
     suffix: '_360p'
   },
   '480p': {
-    resolution: '854x480',
+    height: 480,  // 只指定高度，保持原始宽高比
     videoBitrate: '1000k',
     audioBitrate: '128k',
     crf: 24,
@@ -54,6 +54,29 @@ const STREAMING_PRESETS = {
     suffix: '_480p'
   }
 };
+
+// 计算自适应分辨率（保持宽高比）
+function calculateAdaptiveResolution(originalWidth, originalHeight, targetHeight) {
+  const aspectRatio = originalWidth / originalHeight;
+  const targetWidth = Math.round(targetHeight * aspectRatio);
+  
+  // 确保宽度是偶数（视频编码要求）
+  const adjustedWidth = targetWidth % 2 === 0 ? targetWidth : targetWidth + 1;
+  
+  return `${adjustedWidth}x${targetHeight}`;
+}
+
+// 检测视频方向
+function detectVideoOrientation(width, height) {
+  const aspectRatio = width / height;
+  if (aspectRatio > 1.2) {
+    return 'landscape'; // 横屏
+  } else if (aspectRatio < 0.8) {
+    return 'portrait';  // 竖屏
+  } else {
+    return 'square';    // 正方形
+  }
+}
 
 // 检查 ffmpeg 是否安装
 function checkFFmpeg() {
@@ -85,10 +108,14 @@ function getVideoInfo(videoPath) {
   }
 }
 
-// 优化的视频压缩 - 专门针对网络流播放
-function compressVideoForStreaming(inputPath, outputPath, preset) {
+// 优化的视频压缩 - 专门针对网络流播放，支持横竖屏自适应
+function compressVideoForStreaming(inputPath, outputPath, preset, originalWidth, originalHeight) {
   try {
-    const { resolution, videoBitrate, audioBitrate, crf, preset: ffmpegPreset, bufsize, maxrate, gop } = preset;
+    const { height, videoBitrate, audioBitrate, crf, preset: ffmpegPreset, bufsize, maxrate, gop } = preset;
+    
+    // 计算自适应分辨率（保持原始宽高比）
+    const adaptiveResolution = calculateAdaptiveResolution(originalWidth, originalHeight, height);
+    const orientation = detectVideoOrientation(originalWidth, originalHeight);
     
     // 构建FFmpeg命令 - 重点优化网络播放
     const cmd = `ffmpeg -i "${inputPath}" ` +
@@ -96,7 +123,7 @@ function compressVideoForStreaming(inputPath, outputPath, preset) {
       `-c:v libx264 ` +
       `-preset ${ffmpegPreset} ` +
       `-crf ${crf} ` +
-      `-vf scale=${resolution}:flags=lanczos ` +
+      `-vf scale=${adaptiveResolution}:flags=lanczos ` +
       // 码率控制 - 关键！
       `-b:v ${videoBitrate} ` +
       `-maxrate ${maxrate} ` +
@@ -122,7 +149,7 @@ function compressVideoForStreaming(inputPath, outputPath, preset) {
       // 输出
       `-y "${outputPath}"`;
     
-    console.log(`🔄 压缩视频: ${path.basename(inputPath)} -> ${resolution}`);
+    console.log(`🔄 压缩视频: ${path.basename(inputPath)} -> ${adaptiveResolution} (${orientation})`);
     console.log(`📊 参数: 视频=${videoBitrate}, 音频=${audioBitrate}, CRF=${crf}, GOP=${gop}`);
     
     execSync(cmd, { stdio: 'inherit' });
@@ -141,9 +168,29 @@ function compressVideoForStreaming(inputPath, outputPath, preset) {
   }
 }
 
-// 生成优化的缩略图
-function generateOptimizedThumbnail(inputPath, outputPath) {
+// 生成优化的缩略图 - 支持横竖屏自适应
+function generateOptimizedThumbnail(inputPath, outputPath, originalWidth, originalHeight) {
   try {
+    // 计算缩略图尺寸（保持宽高比，最大边320px）
+    const maxSize = 320;
+    let thumbWidth, thumbHeight;
+    
+    if (originalWidth > originalHeight) {
+      // 横屏视频
+      thumbWidth = maxSize;
+      thumbHeight = Math.round(maxSize * (originalHeight / originalWidth));
+    } else {
+      // 竖屏视频
+      thumbHeight = maxSize;
+      thumbWidth = Math.round(maxSize * (originalWidth / originalHeight));
+    }
+    
+    // 确保尺寸是偶数
+    thumbWidth = thumbWidth % 2 === 0 ? thumbWidth : thumbWidth + 1;
+    thumbHeight = thumbHeight % 2 === 0 ? thumbHeight : thumbHeight + 1;
+    
+    const orientation = detectVideoOrientation(originalWidth, originalHeight);
+    
     // 生成3个时间点的缩略图，选择最清晰的
     const timePoints = ['00:00:01.000', '00:00:03.000', '00:00:05.000'];
     const tempThumbs = [];
@@ -151,7 +198,7 @@ function generateOptimizedThumbnail(inputPath, outputPath) {
     for (let i = 0; i < timePoints.length; i++) {
       const tempPath = outputPath.replace('.jpg', `_temp${i}.jpg`);
       const cmd = `ffmpeg -i "${inputPath}" -ss ${timePoints[i]} -vframes 1 ` +
-        `-vf scale=320:240:flags=lanczos ` +
+        `-vf scale=${thumbWidth}:${thumbHeight}:flags=lanczos ` +
         `-q:v 2 -y "${tempPath}"`;
       
       try {
@@ -188,7 +235,7 @@ function generateOptimizedThumbnail(inputPath, outputPath) {
         }
       });
       
-      console.log(`🖼️  生成缩略图: ${path.basename(outputPath)}`);
+      console.log(`🖼️  生成缩略图: ${path.basename(outputPath)} (${thumbWidth}x${thumbHeight}, ${orientation})`);
       return true;
     }
     
@@ -215,7 +262,8 @@ function processVideoForStreaming(videoPath, category) {
   const originalHeight = videoStream.height;
   const originalSize = fs.statSync(videoPath).size;
   
-  console.log(`📊 原始信息: ${originalWidth}x${originalHeight}, ${(originalSize / 1024 / 1024).toFixed(2)}MB`);
+  const orientation = detectVideoOrientation(originalWidth, originalHeight);
+  console.log(`📊 原始信息: ${originalWidth}x${originalHeight}, ${(originalSize / 1024 / 1024).toFixed(2)}MB (${orientation})`);
   
   // 创建输出目录
   const categoryOutputPath = path.join(OUTPUT_PATH, category);
@@ -225,7 +273,7 @@ function processVideoForStreaming(videoPath, category) {
   
   // 生成缩略图
   const thumbnailPath = path.join(categoryThumbnailPath, `${fileName}.jpg`);
-  generateOptimizedThumbnail(videoPath, thumbnailPath);
+  generateOptimizedThumbnail(videoPath, thumbnailPath, originalWidth, originalHeight);
   
   // 智能选择要生成的质量版本
   const presetsToGenerate = [];
@@ -253,7 +301,7 @@ function processVideoForStreaming(videoPath, category) {
     const outputPath = path.join(categoryOutputPath, outputFileName);
     
     if (!fs.existsSync(outputPath)) {
-      const result = compressVideoForStreaming(videoPath, outputPath, preset);
+      const result = compressVideoForStreaming(videoPath, outputPath, preset, originalWidth, originalHeight);
       if (result.success) {
         console.log(`💾 保存: ${outputFileName}`);
       }
